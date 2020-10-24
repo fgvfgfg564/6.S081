@@ -32,7 +32,7 @@ int main(int argc, char *argv[])
 				memset(argv_buff[p] + i - lst, '\0', 512 - (i - lst));
 				argv2[p + argc - 1] = argv_buff[p];
 				p++;
-				lst = i;
+				lst = i+1;
 			}
 		}
 		argv2[p + argc - 1] = 0;
