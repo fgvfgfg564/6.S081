@@ -5,6 +5,7 @@
 #include "spinlock.h"
 #include "proc.h"
 #include "defs.h"
+#include "sysinfo.h"
 
 struct cpu cpus[NCPU];
 
@@ -701,4 +702,17 @@ procdump(void)
 int count_nproc(void)
 {
   return nproc;
+}
+
+int
+fetch_sysinfo(uint64 addr)
+{
+  struct proc *p = myproc();
+  struct sysinfo st;
+  
+  st.freemem = count_freemem();
+  st.nproc = count_nproc();
+  if(copyout(p->pagetable, addr, (char *)&st, sizeof(st)) < 0)
+    return -1;
+  return 0;
 }

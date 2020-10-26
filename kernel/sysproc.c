@@ -111,19 +111,6 @@ sys_trace(void)
   return 0;
 }
 
-int
-fetch_sysinfo(uint64 addr)
-{
-  struct proc *p = myproc();
-  struct sysinfo st;
-  
-  st.freemem = count_freemem();
-  st.nproc = count_nproc();
-  if(copyout(p->pagetable, addr, (char *)&st, sizeof(st)) < 0)
-    return -1;
-  return 0;
-}
-
 uint64
 sys_sysinfo(void)
 {
