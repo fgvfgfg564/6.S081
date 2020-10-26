@@ -30,21 +30,22 @@ int main()
     pipe(p1);
     pipe(p2);
     char buff[1];
+    char msg=5;
     if(fork() == 0) {
         read(p1[0], buff, 1);
+
         int pid = getpid();
-        writeInt(1, pid);
-        char msg[] = ": received ping\n";
-        write(1, msg, sizeof(msg));
+        printf("%d: received ping\n", pid);
+
         write(p2[1], buff, 1);
         exit(0);
     } else {
-        write(p1[1], buff, 1);
+        write(p1[1], buff, msg);
         read(p2[0], buff, 1);
+
         int pid = getpid();
-        writeInt(1, pid);
-        char msg[] = ": received pong\n";
-        write(1, msg, sizeof(msg));
+        printf("%d: received pong\n", pid);
+
         exit(0);
     }
 }

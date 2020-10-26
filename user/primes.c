@@ -50,6 +50,7 @@ void process(int input)
     }
     if(i > 1)close(p[1]);
     close(input);
+    wait(0);
 }
 
 int main()
@@ -61,6 +62,7 @@ int main()
         for(int i = 2; i <= 35; i++)
             write(p[1], &i, 1);
         close(p[1]);
+        wait(0);
         exit(0);
     } else {
         close(p[1]);
