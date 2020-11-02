@@ -2706,6 +2706,12 @@ main(int argc, char *argv[])
         if(!run(t->f, t->s)){
           fail = 1;
           break;
+        }      
+        int free1 = countfree();
+        if(free1 < free0){
+          printf("FAILED -- lost %d free pages\n", free0 - free1);
+          if(continuous != 2)
+            exit(1);
         }
       }
       if(fail){
@@ -2713,12 +2719,7 @@ main(int argc, char *argv[])
         if(continuous != 2)
           exit(1);
       }
-      int free1 = countfree();
-      if(free1 < free0){
-        printf("FAILED -- lost %d free pages\n", free0 - free1);
-        if(continuous != 2)
-          exit(1);
-      }
+
     }
   }
 

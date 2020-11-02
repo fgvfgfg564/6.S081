@@ -1,0 +1,6 @@
+1. In printf: a1 holds f(8)+1, a2 holds 13
+2. Both is located nowhere. The compiler directly puts 12 in a1.
+3. 0x628
+4. It's still 0x628 because printf saved its value.
+5. HE110 World
+6. It could print anything because the word after 3 takes place is unknown.
