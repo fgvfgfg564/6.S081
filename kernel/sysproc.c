@@ -8,9 +8,6 @@
 #include "proc.h"
 #include "sysinfo.h"
 
-extern int count_freemem(void);
-extern int count_nproc(void);
-
 uint64
 sys_exit(void)
 {
