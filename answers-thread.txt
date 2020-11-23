@@ -1,0 +1,1 @@
+When two threads are trying to insert the same variable, here comes an synchronizing error that maybe both of the threads will insert the same element at the same time.
