@@ -30,16 +30,6 @@ procinit(void)
   initlock(&pid_lock, "nextpid");
   for(p = proc; p < &proc[NPROC]; p++) {
       initlock(&p->lock, "proc");
-
-      // Allocate a page for the process's kernel stack.
-      // Map it high in memory, followed by an invalid
-      // guard page.
-      char *pa = kalloc();
-      if(pa == 0)
-        panic("kalloc");
-      uint64 va = KSTACK((int) (p - proc));
-      kvmmap(va, (uint64)pa, PGSIZE, PTE_R | PTE_W);
-      p->kstack = va;
   }
   kvminithart();
 }
@@ -121,11 +111,22 @@ found:
     return 0;
   }
 
+  p->kernel_pagetable = kern_pagetable(p);
+  if(p->kernel_pagetable == 0){
+    freeproc(p);
+    release(&p->lock);
+    return 0;
+  }
+
   // Set up new context to start executing at forkret,
   // which returns to user space.
   memset(&p->context, 0, sizeof(p->context));
   p->context.ra = (uint64)forkret;
   p->context.sp = p->kstack + PGSIZE;
+
+  // Allocate a page for the process's kernel stack.
+  // Map it high in memory, followed by an invalid
+  // guard page.
 
   return p;
 }
@@ -142,6 +143,9 @@ freeproc(struct proc *p)
   if(p->pagetable)
     proc_freepagetable(p->pagetable, p->sz);
   p->pagetable = 0;
+  if(p->kernel_pagetable)
+    proc_freekernelpagetable(p->kernel_pagetable);
+  p->kernel_pagetable = 0;
   p->sz = 0;
   p->pid = 0;
   p->parent = 0;
@@ -185,6 +189,26 @@ proc_pagetable(struct proc *p)
   return pagetable;
 }
 
+pagetable_t
+kern_pagetable(struct proc *p)
+{
+  pagetable_t pagetable;
+  pagetable = uvmcreate();
+  if(pagetable == 0)
+    return 0;
+
+  kvminit_u(pagetable);
+
+  char *pa = kalloc();
+  if(pa == 0)
+    panic("kalloc");
+  uint64 va = KSTACK((int) (p - proc));
+  kvmmap(va, (uint64)pa, PGSIZE, PTE_R | PTE_W);
+  kvmmap_u(pagetable, va, (uint64)pa, PGSIZE, PTE_R | PTE_W);
+  p->kstack = va;
+  return pagetable;
+}
+
 // Free a process's page table, and free the
 // physical memory it refers to.
 void
@@ -193,6 +217,22 @@ proc_freepagetable(pagetable_t pagetable, uint64 sz)
   uvmunmap(pagetable, TRAMPOLINE, 1, 0);
   uvmunmap(pagetable, TRAPFRAME, 1, 0);
   uvmfree(pagetable, sz);
+}
+
+void
+proc_freekernelpagetable(pagetable_t pagetable)
+{
+  // there are 2^9 = 512 PTEs in a page table.
+  for(int i = 0; i < 512; i++){
+    pte_t pte = pagetable[i];
+    if((pte & PTE_V) && (pte & (PTE_R|PTE_W|PTE_X)) == 0){
+      // this PTE points to a lower-level page table.
+      uint64 child = PTE2PA(pte);
+      proc_freekernelpagetable((pagetable_t)child);
+      pagetable[i] = 0;
+    }
+  }
+  kfree((void*)pagetable);
 }
 
 // a user program that calls exec("/init")
@@ -273,6 +313,7 @@ fork(void)
     release(&np->lock);
     return -1;
   }
+
   np->sz = p->sz;
 
   np->parent = p;
@@ -473,6 +514,8 @@ scheduler(void)
         // before jumping back to us.
         p->state = RUNNING;
         c->proc = p;
+        w_satp(MAKE_SATP(p->kernel_pagetable));
+        sfence_vma();
         swtch(&c->context, &p->context);
 
         // Process is done running for now.
