@@ -30,6 +30,13 @@ procinit(void)
   initlock(&pid_lock, "nextpid");
   for(p = proc; p < &proc[NPROC]; p++) {
       initlock(&p->lock, "proc");
+      char *pa = kalloc();
+      if(pa == 0)
+        panic("kalloc");
+      uint64 va = KSTACK((int) (p - proc));
+      p->kstack = va;
+      p->kstack_pa = (uint64)pa;
+      kvmmap(p->kstack, (uint64)p->kstack_pa, PGSIZE, PTE_R | PTE_W);
   }
   kvminithart();
 }
@@ -198,14 +205,7 @@ kern_pagetable(struct proc *p)
     return 0;
 
   kvminit_u(pagetable);
-
-  char *pa = kalloc();
-  if(pa == 0)
-    panic("kalloc");
-  uint64 va = KSTACK((int) (p - proc));
-  kvmmap(va, (uint64)pa, PGSIZE, PTE_R | PTE_W);
-  kvmmap_u(pagetable, va, (uint64)pa, PGSIZE, PTE_R | PTE_W);
-  p->kstack = va;
+  kvmmap_u(pagetable, p->kstack, (uint64)p->kstack_pa, PGSIZE, PTE_R | PTE_W);
   return pagetable;
 }
 

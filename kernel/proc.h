@@ -105,4 +105,5 @@ struct proc {
   char name[16];               // Process name (debugging)
 
   pagetable_t kernel_pagetable;
+  uint64 kstack_pa;
 };
