@@ -18,6 +18,7 @@ struct spinlock pid_lock;
 extern void forkret(void);
 static void wakeup1(struct proc *chan);
 static void freeproc(struct proc *p);
+extern pagetable_t kernel_pagetable;
 
 extern char trampoline[]; // trampoline.S
 
@@ -222,6 +223,8 @@ proc_freepagetable(pagetable_t pagetable, uint64 sz)
 void
 proc_freekernelpagetable(pagetable_t pagetable)
 {
+  if(pagetable == 0)
+    panic("pagetable = 0");
   // there are 2^9 = 512 PTEs in a page table.
   for(int i = 0; i < 512; i++){
     pte_t pte = pagetable[i];
@@ -528,6 +531,8 @@ scheduler(void)
     }
 #if !defined (LAB_FS)
     if(found == 0) {
+      w_satp(MAKE_SATP(kernel_pagetable));
+      sfence_vma();
       intr_on();
       asm volatile("wfi");
     }

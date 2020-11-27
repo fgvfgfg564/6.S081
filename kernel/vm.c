@@ -265,7 +265,7 @@ uvmalloc(pagetable_t pagetable, uint64 oldsz, uint64 newsz, pagetable_t kernel_p
   if(newsz < oldsz)
     return oldsz;
 
-  if(newsz > PLIC)
+  if(newsz > 100*1024*1024)
     return 0;
 
   oldsz = PGROUNDUP(oldsz);
@@ -303,7 +303,7 @@ uvmdealloc(pagetable_t pagetable, uint64 oldsz, uint64 newsz, pagetable_t kernel
   if(PGROUNDUP(newsz) < PGROUNDUP(oldsz)){
     int npages = (PGROUNDUP(oldsz) - PGROUNDUP(newsz)) / PGSIZE;
     uvmunmap(pagetable, PGROUNDUP(newsz), npages, 1);
-    uvmunmap(kernel_pagetable, PGROUNDUP(newsz), npages, 1);
+    uvmunmap(kernel_pagetable, PGROUNDUP(newsz), npages, 0);
   }
 
   return newsz;
@@ -423,7 +423,7 @@ copyout(pagetable_t pagetable, uint64 dstva, char *src, uint64 len)
 int
 copyin(pagetable_t pagetable, char *dst, uint64 srcva, uint64 len)
 {
-//  return copyin_new(pagetable, dst, srcva, len);
+  return copyin_new(pagetable, dst, srcva, len);
   uint64 n, va0, pa0;
 
   while(len > 0){
@@ -450,7 +450,7 @@ copyin(pagetable_t pagetable, char *dst, uint64 srcva, uint64 len)
 int
 copyinstr(pagetable_t pagetable, char *dst, uint64 srcva, uint64 max)
 {
-//  return copyinstr_new(pagetable, dst, srcva, max);
+  return copyinstr_new(pagetable, dst, srcva, max);
   uint64 n, va0, pa0;
   int got_null = 0;
 
