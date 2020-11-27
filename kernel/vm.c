@@ -56,9 +56,6 @@ kvminit_u(pagetable_t pagetable)
   // virtio mmio disk interface
   kvmmap_u(pagetable, VIRTIO0, VIRTIO0, PGSIZE, PTE_R | PTE_W);
 
-  // CLINT
-  kvmmap_u(pagetable, CLINT, CLINT, 0x10000, PTE_R | PTE_W);
-
   // PLIC
   kvmmap_u(pagetable, PLIC, PLIC, 0x400000, PTE_R | PTE_W);
 
@@ -200,28 +197,6 @@ mappages(pagetable_t pagetable, uint64 va, uint64 size, uint64 pa, int perm)
   return 0;
 }
 
-int 
-remap_pages(pagetable_t pagetable, uint64 va, uint64 size, uint64 pa, int perm)
-{
-  uint64 a, last;
-  pte_t *pte;
-
-  a = PGROUNDDOWN(va);
-  last = PGROUNDDOWN(va + size - 1);
-  for(;;){
-    if((pte = walk(pagetable, a, 1)) == 0)
-      return -1;
-    if(!(*pte & PTE_V))
-      panic("remapping unknown pages");
-    *pte = PA2PTE(pa) | perm | PTE_V;
-    if(a == last)
-      break;
-    a += PGSIZE;
-    pa += PGSIZE;
-  }
-  return 0;
-}
-
 // Remove npages of mappings starting from va. va must be
 // page-aligned. The mappings must exist.
 // Optionally free the physical memory.
@@ -266,7 +241,7 @@ uvmcreate()
 // for the very first process.
 // sz must be less than a page.
 void
-uvminit(pagetable_t pagetable, uchar *src, uint sz)
+uvminit(pagetable_t pagetable, uchar *src, uint sz, pagetable_t kernel_pagetable)
 {
   char *mem;
 
@@ -275,13 +250,14 @@ uvminit(pagetable_t pagetable, uchar *src, uint sz)
   mem = kalloc();
   memset(mem, 0, PGSIZE);
   mappages(pagetable, 0, PGSIZE, (uint64)mem, PTE_W|PTE_R|PTE_X|PTE_U);
+  mappages(kernel_pagetable, 0, PGSIZE, (uint64)mem, PTE_W|PTE_R|PTE_X);
   memmove(mem, src, sz);
 }
 
 // Allocate PTEs and physical memory to grow process from oldsz to
 // newsz, which need not be page aligned.  Returns new size or 0 on error.
 uint64
-uvmalloc(pagetable_t pagetable, uint64 oldsz, uint64 newsz)
+uvmalloc(pagetable_t pagetable, uint64 oldsz, uint64 newsz, pagetable_t kernel_pagetable)
 {
   char *mem;
   uint64 a;
@@ -289,17 +265,25 @@ uvmalloc(pagetable_t pagetable, uint64 oldsz, uint64 newsz)
   if(newsz < oldsz)
     return oldsz;
 
+  if(newsz > PLIC)
+    return 0;
+
   oldsz = PGROUNDUP(oldsz);
   for(a = oldsz; a < newsz; a += PGSIZE){
     mem = kalloc();
     if(mem == 0){
-      uvmdealloc(pagetable, a, oldsz);
+      uvmdealloc(pagetable, a, oldsz, kernel_pagetable);
       return 0;
     }
     memset(mem, 0, PGSIZE);
     if(mappages(pagetable, a, PGSIZE, (uint64)mem, PTE_W|PTE_X|PTE_R|PTE_U) != 0){
       kfree(mem);
-      uvmdealloc(pagetable, a, oldsz);
+      uvmdealloc(pagetable, a, oldsz, kernel_pagetable);
+      return 0;
+    }
+    if(mappages(kernel_pagetable, a, PGSIZE, (uint64)mem, PTE_W|PTE_X|PTE_R) != 0){
+      kfree(mem);
+      uvmdealloc(pagetable, a, oldsz, kernel_pagetable);
       return 0;
     }
   }
@@ -311,7 +295,7 @@ uvmalloc(pagetable_t pagetable, uint64 oldsz, uint64 newsz)
 // need to be less than oldsz.  oldsz can be larger than the actual
 // process size.  Returns the new process size.
 uint64
-uvmdealloc(pagetable_t pagetable, uint64 oldsz, uint64 newsz)
+uvmdealloc(pagetable_t pagetable, uint64 oldsz, uint64 newsz, pagetable_t kernel_pagetable)
 {
   if(newsz >= oldsz)
     return oldsz;
@@ -319,6 +303,7 @@ uvmdealloc(pagetable_t pagetable, uint64 oldsz, uint64 newsz)
   if(PGROUNDUP(newsz) < PGROUNDUP(oldsz)){
     int npages = (PGROUNDUP(oldsz) - PGROUNDUP(newsz)) / PGSIZE;
     uvmunmap(pagetable, PGROUNDUP(newsz), npages, 1);
+    uvmunmap(kernel_pagetable, PGROUNDUP(newsz), npages, 1);
   }
 
   return newsz;
@@ -361,7 +346,7 @@ uvmfree(pagetable_t pagetable, uint64 sz)
 // returns 0 on success, -1 on failure.
 // frees any allocated pages on failure.
 int
-uvmcopy(pagetable_t old, pagetable_t new, uint64 sz)
+uvmcopy(pagetable_t old, pagetable_t new, uint64 sz, pagetable_t kernel)
 {
   pte_t *pte;
   uint64 pa, i;
@@ -379,6 +364,10 @@ uvmcopy(pagetable_t old, pagetable_t new, uint64 sz)
       goto err;
     memmove(mem, (char*)pa, PGSIZE);
     if(mappages(new, i, PGSIZE, (uint64)mem, flags) != 0){
+      kfree(mem);
+      goto err;
+    }
+    if(mappages(kernel, i, PGSIZE, (uint64)mem, flags & ~PTE_U) != 0){
       kfree(mem);
       goto err;
     }
