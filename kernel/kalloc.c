@@ -9,6 +9,8 @@
 #include "riscv.h"
 #include "defs.h"
 
+extern char refcount[];
+
 void freerange(void *pa_start, void *pa_end);
 
 extern char end[]; // first address after kernel.
@@ -78,5 +80,6 @@ kalloc(void)
 
   if(r)
     memset((char*)r, 5, PGSIZE); // fill with junk
+  refcount[(uint64)r/PGSIZE] = 1;
   return (void*)r;
 }

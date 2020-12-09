@@ -6,10 +6,11 @@
 #include "proc.h"
 #include "defs.h"
 
-struct spinlock tickslock;
+struct spinlock tickslock, cowlock;
 uint ticks;
 
 extern char trampoline[], uservec[], userret[];
+
 
 // in kernelvec.S, calls kerneltrap().
 void kernelvec();
@@ -20,6 +21,7 @@ void
 trapinit(void)
 {
   initlock(&tickslock, "time");
+  initlock(&cowlock, "cow");
 }
 
 // set up to take exceptions and traps while in the kernel.
@@ -67,7 +69,14 @@ usertrap(void)
     syscall();
   } else if((which_dev = devintr()) != 0){
     // ok
-  } else {
+  } else if((r_scause() == 13 || r_scause() == 15)){
+    acquire(&cowlock);
+    if(!apply_cow(p->pagetable, r_stval())){
+      p->killed = 1;
+    }
+    release(&cowlock);
+  }
+  else {
     printf("usertrap(): unexpected scause %p pid=%d\n", r_scause(), p->pid);
     printf("            sepc=%p stval=%p\n", r_sepc(), r_stval());
     p->killed = 1;
