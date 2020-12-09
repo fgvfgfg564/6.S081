@@ -6,7 +6,7 @@
 #include "proc.h"
 #include "defs.h"
 
-struct spinlock tickslock, cowlock;
+struct spinlock tickslock;
 uint ticks;
 
 extern char trampoline[], uservec[], userret[];
@@ -21,7 +21,6 @@ void
 trapinit(void)
 {
   initlock(&tickslock, "time");
-  initlock(&cowlock, "cow");
 }
 
 // set up to take exceptions and traps while in the kernel.
@@ -70,11 +69,9 @@ usertrap(void)
   } else if((which_dev = devintr()) != 0){
     // ok
   } else if((r_scause() == 13 || r_scause() == 15)){
-    acquire(&cowlock);
     if(!apply_cow(p->pagetable, r_stval())){
       p->killed = 1;
     }
-    release(&cowlock);
   }
   else {
     printf("usertrap(): unexpected scause %p pid=%d\n", r_scause(), p->pid);

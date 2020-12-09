@@ -5,11 +5,13 @@
 #include "riscv.h"
 #include "defs.h"
 #include "fs.h"
+#include "spinlock.h"
 
 /*
  * the kernel's page table.
  */
 pagetable_t kernel_pagetable;
+struct spinlock cowlock, unmaplock;
 
 extern char etext[];  // kernel.ld sets this to end of kernel code.
 
@@ -24,6 +26,9 @@ void
 kvminit()
 {
   kernel_pagetable = (pagetable_t) kalloc();
+  initlock(&cowlock, "cow");
+  initlock(&unmaplock, "uvmunmap");
+
   memset(kernel_pagetable, 0, PGSIZE);
 
   // uart registers
@@ -116,6 +121,24 @@ walkaddr(pagetable_t pagetable, uint64 va)
   return pa;
 }
 
+pte_t *
+walkpte(pagetable_t pagetable, uint64 va)
+{
+  pte_t *pte;
+
+  if (va >= MAXVA)
+    return 0;
+
+  pte = walk(pagetable, va, 0);
+  if (pte == 0)
+    return 0;
+  if ((*pte & PTE_V) == 0)
+    return 0;
+  if ((*pte & PTE_U) == 0)
+    return 0;
+  return pte;
+}
+
 // add a mapping to the kernel page table.
 // only used when booting.
 // does not flush TLB or enable paging.
@@ -178,6 +201,7 @@ mappages(pagetable_t pagetable, uint64 va, uint64 size, uint64 pa, int perm)
 void
 uvmunmap(pagetable_t pagetable, uint64 va, uint64 npages, int do_free)
 {
+  acquire(&unmaplock);
   uint64 a;
   pte_t *pte;
 
@@ -199,6 +223,7 @@ uvmunmap(pagetable_t pagetable, uint64 va, uint64 npages, int do_free)
     }
     *pte = 0;
   }
+  release(&unmaplock);
 }
 
 // create an empty user page table.
@@ -315,6 +340,7 @@ uvmfree(pagetable_t pagetable, uint64 sz)
 int
 uvmcopy(pagetable_t old, pagetable_t new, uint64 sz)
 {
+  acquire(&cowlock);
   pte_t *pte;
   uint64 pa, i;
   uint flags;
@@ -332,9 +358,11 @@ uvmcopy(pagetable_t old, pagetable_t new, uint64 sz)
       goto err;
     refcount[pa/PGSIZE] ++;
   }
+  release(&cowlock);
   return 0;
 
 err:
+  release(&cowlock);
   uvmunmap(new, 0, i / PGSIZE, 1);
   return -1;
 }
@@ -362,10 +390,11 @@ copyout(pagetable_t pagetable, uint64 dstva, char *src, uint64 len)
 
   while (len > 0) {
     va0 = PGROUNDDOWN(dstva);
-    pte_t *pte = walk(pagetable, va0, 0);
-    if(*pte & PTE_C){
+    pte_t *pte = walkpte(pagetable, va0);
+    if(pte != 0 && *pte & PTE_C){
       apply_cow(pagetable, va0);
     }
+
     pa0 = walkaddr(pagetable, va0);
     if (pa0 == 0)
       return -1;
@@ -451,26 +480,36 @@ copyinstr(pagetable_t pagetable, char *dst, uint64 srcva, uint64 max)
 char
 apply_cow(pagetable_t tbl, uint64 va)
 {
+  acquire(&cowlock);
   va = PGROUNDDOWN(va);
   uint64 pa, flags;
   pte_t *pte = walk(tbl, va, 0);
-  if (pte == 0 || !((*pte) & PTE_C)) return 0;
+  if (pte == 0 || !((*pte) & PTE_C)){
+    release(&cowlock);
+    return 0;
+  }
   pa = PTE2PA(*pte);
   if (refcount[pa / PGSIZE] == 1) {
     *pte |= PTE_W;
     *pte &= ~PTE_C;
+    release(&cowlock);
     return 1;
   }
   flags = PTE_FLAGS(*pte);
   flags |= PTE_W;
   flags &= ~PTE_C;
   char *mem;
-  if ((mem = kalloc()) == 0) return 0;
+  if ((mem = kalloc()) == 0) {
+    release(&cowlock);
+    return 0;
+  }
   uvmunmap(tbl, va, 1, 0);
   memmove(mem, (char *)pa, PGSIZE);
   if (mappages(tbl, va, PGSIZE, (uint64)mem, flags) != 0) {
     kfree(mem);
+    release(&cowlock);
     return 0;
   }
+  release(&cowlock);
   return 1;
 }
