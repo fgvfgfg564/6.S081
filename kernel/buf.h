@@ -7,6 +7,5 @@ struct buf {
   struct spinlock kernel_lock;
   uint refcnt;
   uchar data[BSIZE];
-  struct buf* prev, next;
 };
 

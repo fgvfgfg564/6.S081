@@ -186,6 +186,7 @@ brelse(struct buf *b)
     push_usage(b - bcache);
 
   release(&b->kernel_lock);
+  //printf("release %d\n", b - bcache);
   pop_off();
 }
 
