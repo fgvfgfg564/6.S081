@@ -4,9 +4,9 @@ struct buf {
   uint dev;
   uint blockno;
   struct sleeplock lock;
+  struct spinlock kernel_lock;
   uint refcnt;
-  struct buf *prev; // LRU cache list
-  struct buf *next;
   uchar data[BSIZE];
+  struct buf* prev, next;
 };
 

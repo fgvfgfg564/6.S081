@@ -3,7 +3,7 @@
 #include "kernel/fcntl.h"
 #include "user/user.h"
 
-#define SZ 4096
+#define SZ 16384
 char buf[SZ];
 
 int

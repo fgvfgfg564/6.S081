@@ -9,7 +9,7 @@
 void test0();
 void test1();
 
-#define SZ 4096
+#define SZ 16384
 char buf[SZ];
 
 int
