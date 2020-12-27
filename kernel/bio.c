@@ -25,76 +25,23 @@
 
 
 struct buf bcache[NBUF];
-
-struct {
-  int stack[NBUF * 10];
-  int top;
-  int count[NBUF];
-  struct spinlock lock;
-} usage;
-
-// refresh count
-// usage.lock must be hold
-void refrest_usage()
-{
-  int temp[NBUF * 10];
-  int top2 = 0, tot = 0;
-  for (int i = 0; i < NBUF; i++) {
-    if (usage.count[i]) top2++;
-  }
-  tot = top2;
-  memset(usage.count, 0, sizeof(usage.count));
-  for (int i = usage.top - 1; i >= 0; i--) {
-    if (usage.count[usage.stack[i]] == 0) {
-      temp[--top2] = usage.stack[i];
-      usage.count[usage.stack[i]] = 1;
-    }
-  }
-  memmove(usage.stack, temp, sizeof(temp));
-  usage.top = tot;
-}
-
-void push_usage(int ind)
-{
-  acquire(&usage.lock);
-  if (usage.top == NBUF * 10) refrest_usage();
-  usage.stack[++usage.top] = ind;
-  usage.count[ind] ++;
-  release(&usage.lock);
-}
-
-int pop_usage()
-{
-  acquire(&usage.lock);
-  int res;
-  do {
-    if (usage.top == 0) {
-      release(&usage.lock);
-      return -1;
-    }
-    res = usage.stack[--usage.top];
-    usage.count[res] --;
-  } while (usage.count[res] != 0 || bcache[res].refcnt != 0);
-  release(&usage.lock);
-  if (res >= NBUF)
-    panic("pop usage");
-  return res;
-}
+uint lru[NBUF];
+struct spinlock lock[NBUCKET];
+uint mapi[NTEMP], mapx[NTEMP], mapy[NTEMP], cnt;
+struct spinlock maplock;
 
 void
 binit(void)
 {
   struct buf *b;
-  initlock(&usage.lock, "bcache_usage");
-  usage.top = 0;
-  memset(usage.count, 0, sizeof(usage.count));
+  initlock(&maplock, "bcache_map");
 
   // Create linked list of buffers
-  for (b = bcache; b < bcache + NBUF; b++) {
-    push_usage(b - bcache);
+  for (b = bcache; b < bcache + NBUF; b++)
     initsleeplock(&b->lock, "buffer");
-    initlock(&b->kernel_lock, "bcache");
-  }
+  for (int i = 0; i < NBUCKET; i++)
+    initlock(&lock[i], "bcache_lock");
+  cnt = 0;
 }
 
 // Look through buffer cache for block on device dev.
@@ -104,45 +51,78 @@ static struct buf *
 bget(uint dev, uint blockno)
 {
   struct buf *b;
-  push_off();
-
-  // Is the block already cached?
-  for (b = bcache; b < bcache + NBUF; b++) {
-    //printf("acquire %d\n", b - bcache);
-    acquire(&b->kernel_lock);
+  int h = blockno % NBUCKET;
+  for (int i = 0; i < cnt; i++) {
+    if (mapi[i] == dev && mapx[i] == blockno) {
+      h = mapy[i];
+      break;
+    }
+  }
+  acquire(&lock[h]);
+  for (int i = h * 10; i < h * 10 + 10; i++) {
+    b = bcache + i;
     if (b->dev == dev && b->blockno == blockno) {
       b->refcnt++;
-      release(&b->kernel_lock);
+      release(&lock[h]);
       //printf("release %d\n", b - bcache);
       acquiresleep(&b->lock);
-      pop_off();
       return b;
     }
-    release(&b->kernel_lock);
     //printf("release %d\n", b - bcache);
   }
 
   // Not cached.
   // Recycle the least recently used (LRU) unused buffer.
-  int ind = pop_usage();
-  if (ind < 0)
-    panic("bget: ind out of range");
-  b = bcache + ind;
-  //printf("acquire %d\n", b - bcache);
-  acquire(&b->kernel_lock);
-  if (b < 0)
-    panic("bget: no buffers");
-  if (b->refcnt != 0)
-    panic("bget");
-  b->dev = dev;
-  b->blockno = blockno;
-  b->valid = 0;
-  b->refcnt = 1;
-  release(&b->kernel_lock);
+  int mini = -1, minx = 0x7fffffff;
+  for (int i = h * 10; i < h * 10 + 10; i++) {
+    b = bcache + i;
+    if (b->refcnt == 0 && lru[i] < minx) {
+      minx = lru[i];
+      mini = i;
+    }
+    //printf("release %d\n", b - bcache);
+  }
+  if (mini >= 0) {
+    b = bcache + mini;
+    b->dev = dev;
+    b->blockno = blockno;
+    b->valid = 0;
+    b->refcnt = 1;
+    release(&lock[h]);
+    acquiresleep(&b->lock);
+    return b;
+  }
   //printf("release %d\n", b - bcache);
-  acquiresleep(&b->lock);
-  pop_off();
-  return b;
+
+  release(&lock[h]);
+  mini = -1; minx = 0x7fffffff;
+  for (int i = 0; i < NBUCKET; i++)
+    acquire(&lock[i]);
+  for (int i = (h + 1) % NBUCKET; i != h; i = (i + 1) % NBUCKET) {
+    for (int j = 0; j < 10; j++) {
+      b = bcache + i * 10 + j;
+      if (b->refcnt == 0 && lru[i * 10 + j] < minx) {
+        minx = lru[i * 10 + j];
+        mini = i * 10 + j;
+      }
+    }
+  }
+  if (mini >= 0) {
+    mapi[cnt] = mini / 10;
+    mapx[cnt] = dev;
+    mapy[cnt] = blockno;
+
+    b = bcache + mini;
+    b->dev = dev;
+    b->blockno = blockno;
+    b->valid = 0;
+    b->refcnt = 1;
+    for (int i = 0; i < NBUCKET; i++)
+      release(&lock[i]);
+    acquiresleep(&b->lock);
+    return b;
+  }
+  panic("bget: no buffers");
 }
 
 // Return a locked buf with the contents of the indicated block.
@@ -173,37 +153,37 @@ bwrite(struct buf *b)
 void
 brelse(struct buf *b)
 {
-  push_off();
   if (!holdingsleep(&b->lock))
     panic("brelse");
 
   releasesleep(&b->lock);
 
   //printf("acquire %d\n", b - bcache);
-  acquire(&b->kernel_lock);
+  int h = (b - bcache) / 10;
+  acquire(&lock[h]);
   b->refcnt--;
-  if (b->refcnt == 0)
-    push_usage(b - bcache);
+  lru[b-bcache] = ticks;
+  release(&lock[h]);
 
-  release(&b->kernel_lock);
   //printf("release %d\n", b - bcache);
-  pop_off();
 }
 
 void
 bpin(struct buf *b)
 {
-  acquire(&b->kernel_lock);
+  int h = (b - bcache) / 10;
+  acquire(&lock[h]);
   b->refcnt++;
-  release(&b->kernel_lock);
+  release(&lock[h]);
 }
 
 void
 bunpin(struct buf *b)
 {
-  acquire(&b->kernel_lock);
+  int h = (b - bcache) / 10;
+  acquire(&lock[h]);
   b->refcnt--;
-  release(&b->kernel_lock);
+  release(&lock[h]);
 }
 
 

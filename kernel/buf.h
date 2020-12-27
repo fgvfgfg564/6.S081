@@ -4,7 +4,6 @@ struct buf {
   uint dev;
   uint blockno;
   struct sleeplock lock;
-  struct spinlock kernel_lock;
   uint refcnt;
   uchar data[BSIZE];
 };
