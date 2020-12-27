@@ -59,7 +59,7 @@ bget(uint dev, uint blockno)
     }
   }
   acquire(&lock[h]);
-  for (int i = h * 10; i < h * 10 + 10; i++) {
+  for (int i = h * NBUFPERBUC; i < (h+1) * NBUFPERBUC; i++) {
     b = bcache + i;
     if (b->dev == dev && b->blockno == blockno) {
       b->refcnt++;
@@ -74,7 +74,7 @@ bget(uint dev, uint blockno)
   // Not cached.
   // Recycle the least recently used (LRU) unused buffer.
   int mini = -1, minx = 0x7fffffff;
-  for (int i = h * 10; i < h * 10 + 10; i++) {
+  for (int i = h * NBUFPERBUC; i < (h+1) * NBUFPERBUC; i++) {
     b = bcache + i;
     if (b->refcnt == 0 && lru[i] < minx) {
       minx = lru[i];
@@ -99,16 +99,16 @@ bget(uint dev, uint blockno)
   for (int i = 0; i < NBUCKET; i++)
     acquire(&lock[i]);
   for (int i = (h + 1) % NBUCKET; i != h; i = (i + 1) % NBUCKET) {
-    for (int j = 0; j < 10; j++) {
-      b = bcache + i * 10 + j;
-      if (b->refcnt == 0 && lru[i * 10 + j] < minx) {
-        minx = lru[i * 10 + j];
-        mini = i * 10 + j;
+    for (int j = 0; j < NBUFPERBUC; j++) {
+      b = bcache + i * NBUFPERBUC + j;
+      if (b->refcnt == 0 && lru[i * NBUFPERBUC + j] < minx) {
+        minx = lru[i * NBUFPERBUC + j];
+        mini = i * NBUFPERBUC + j;
       }
     }
   }
   if (mini >= 0) {
-    mapi[cnt] = mini / 10;
+    mapi[cnt] = mini / NBUFPERBUC;
     mapx[cnt] = dev;
     mapy[cnt] = blockno;
 
@@ -159,7 +159,7 @@ brelse(struct buf *b)
   releasesleep(&b->lock);
 
   //printf("acquire %d\n", b - bcache);
-  int h = (b - bcache) / 10;
+  int h = (b - bcache) / NBUFPERBUC;
   acquire(&lock[h]);
   b->refcnt--;
   lru[b-bcache] = ticks;
@@ -171,7 +171,7 @@ brelse(struct buf *b)
 void
 bpin(struct buf *b)
 {
-  int h = (b - bcache) / 10;
+  int h = (b - bcache) / NBUFPERBUC;
   acquire(&lock[h]);
   b->refcnt++;
   release(&lock[h]);
@@ -180,7 +180,7 @@ bpin(struct buf *b)
 void
 bunpin(struct buf *b)
 {
-  int h = (b - bcache) / 10;
+  int h = (b - bcache) / NBUFPERBUC;
   acquire(&lock[h]);
   b->refcnt--;
   release(&lock[h]);
