@@ -325,6 +325,7 @@ sfence_vma()
 
 #define PGROUNDUP(sz)  (((sz)+PGSIZE-1) & ~(PGSIZE-1))
 #define PGROUNDDOWN(a) (((a)) & ~(PGSIZE-1))
+#define PRANGE(x,y) (PGROUNDUP(y)-PGROUNDDOWN(x))
 
 #define PTE_V (1L << 0) // valid
 #define PTE_R (1L << 1)

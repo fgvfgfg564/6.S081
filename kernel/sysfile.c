@@ -515,21 +515,6 @@ sys_mmap(void)
   return -1;
 }
 
-#define PRANGE(x,y) (PGROUNDUP(y)-PGROUNDDOWN(x))
-
-int
-writeback(struct file *f, uint64 addr, uint off, uint npages)
-{
-  for (int i = 0; i < npages; i++) {
-    begin_op();
-    ilock(f->ip);
-    writei(f->ip, 1, addr + i * PGSIZE, off + i * PGSIZE, PGSIZE);
-    iunlock(f->ip);
-    end_op();
-  }
-  return 0;
-}
-
 uint64
 sys_munmap(void)
 {
@@ -539,13 +524,13 @@ sys_munmap(void)
   struct proc *p = myproc();
   for (int i = 0; i < NVMAS; ++i) {
     struct VMA *vma = &p->vmas[i];
-    if (vma->address <= addr && addr < vma->address + vma->length) {
+    if (vma->used && vma->address <= addr && addr < vma->address + vma->length) {
       if (vma->address != addr && vma->address + vma->length != addr + length)
         return -1;
       if (length > vma->length) return -1;
       if (vma->flags & MAP_SHARED)
         writeback(vma->file, PGROUNDDOWN(addr), vma->offset, PRANGE(addr,
-                  addr + length));
+                  addr + length) / PGSIZE);
       if (length == vma->length) {
         uvmunmap(p->pagetable, PGROUNDDOWN(addr), PRANGE(addr + length, addr) / PGSIZE,
                  1);

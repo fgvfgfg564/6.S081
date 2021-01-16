@@ -516,6 +516,19 @@ writei(struct inode *ip, int user_src, uint64 src, uint off, uint n)
   return tot;
 }
 
+int
+writeback(struct file *f, uint64 addr, uint off, uint npages)
+{
+  for (int i = 0; i < npages; i++) {
+    begin_op();
+    ilock(f->ip);
+    writei(f->ip, 1, addr + i * PGSIZE, off + i * PGSIZE, PGSIZE);
+    iunlock(f->ip);
+    end_op();
+  }
+  return 0;
+}
+
 // Directories
 
 int
